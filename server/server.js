@@ -18,7 +18,6 @@ const app = express();
 const server = http.createServer(app);
 
 // Setup Socket.IO for real-time WebSockets
-const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
 const io = new SocketIOServer(server, {
   cors: {
     origin: '*',
@@ -63,10 +62,22 @@ io.on('connection', (socket) => {
   });
 
   // Client requests immediate live snapshot
-  socket.on('request:snapshot', () => {
-    import('./controllers/telemetryController.js').then(({ getLiveReading }) => {
-      // Socket snapshot request handled
-    });
+  socket.on('request:snapshot', async () => {
+    try {
+      const { getLatestReading, getDevice, getSettings } = await import('./services/storeService.js');
+      const [latest, device, settings] = await Promise.all([getLatestReading(), getDevice(), getSettings()]);
+      const latestData = typeof latest.toObject === 'function' ? latest.toObject() : latest;
+      const deviceData = typeof device.toObject === 'function' ? device.toObject() : device;
+      socket.emit('telemetry:snapshot', {
+        ...latestData,
+        tariffRate: settings.tariffRate,
+        relayState: deviceData.relayState,
+        deviceOnline: deviceData.status === 'online',
+        lastSeen: deviceData.lastSeen,
+      });
+    } catch (e) {
+      console.error('[WebSocket] Snapshot request error:', e.message);
+    }
   });
 });
 

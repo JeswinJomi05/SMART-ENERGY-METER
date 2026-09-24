@@ -64,8 +64,8 @@
 // WIFI
 // ============================================================
 
-char ssid[] = "YOUR_WIFI_NAME";
-char pass[] = "YOUR_WIFI_PASSWORD";
+char ssid[] = "Keralavision  1572 ( 2.4G )";
+char pass[] = "Cassandra07";
 
 // ============================================================
 // MERN BACKEND SERVER
@@ -75,7 +75,7 @@ char pass[] = "YOUR_WIFI_PASSWORD";
 // Run `ipconfig` in Windows CMD to find it.
 // Example: 192.168.1.100
 //
-const char* BACKEND_SERVER_IP   = "192.167.2.31";
+const char* BACKEND_SERVER_IP   = "192.168.1.35";
 const int   BACKEND_SERVER_PORT = 5000;
 const char* BACKEND_TELEMETRY_ENDPOINT = "/api/telemetry";
 
@@ -124,7 +124,7 @@ float ACS_SENSITIVITY = 0.185;
 // BILLING
 // ============================================================
 
-float TARIFF = 10000;
+float TARIFF = 8.00;
 
 // ============================================================
 // MEASUREMENT PARAMETERS

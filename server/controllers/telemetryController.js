@@ -16,19 +16,27 @@ export const setSocketIO = (io) => {
 // Process telemetry from ESP32 (HTTP POST /api/telemetry, /data, or MQTT)
 export const processIncomingTelemetry = async (payload) => {
   const deviceId = payload.deviceId || 'ESP32-SMART-METER-IND-7782';
+
+  const toNum = (val, fallback = 0) => {
+    if (val === undefined || val === null || val === '') return fallback;
+    const n = parseFloat(val);
+    return Number.isFinite(n) ? n : fallback;
+  };
   
   // Support both standard names and esp/esp.ino variable names
-  const voltage = parseFloat(payload.voltage ?? payload.voltageRMS) || 228.0;
-  const current = parseFloat(payload.current ?? payload.currentRMS) || 0.0;
-  const power = parseFloat(payload.power ?? payload.powerW) || Math.round(voltage * current);
-  const energy = parseFloat(payload.energy ?? payload.energyKWh) || 12.8;
-  const frequency = parseFloat(payload.frequency) || 50.0;
-  const powerFactor = parseFloat(payload.powerFactor) || 0.98;
+  const voltage = toNum(payload.voltage ?? payload.voltageRMS, 0.0);
+  const current = toNum(payload.current ?? payload.currentRMS, 0.0);
+  const power = (payload.power !== undefined || payload.powerW !== undefined)
+    ? toNum(payload.power ?? payload.powerW, 0.0)
+    : Math.round(voltage * current);
+  const energy = toNum(payload.energy ?? payload.energyKWh, 0.0);
+  const frequency = toNum(payload.frequency, 50.0);
+  const powerFactor = toNum(payload.powerFactor, 0.98);
 
   // Fetch current tariff rate
   const settings = await getSettings();
-  const tariffRate = parseFloat(payload.tariff) || settings.tariffRate || 8.0;
-  const cost = payload.bill !== undefined ? parseFloat(parseFloat(payload.bill).toFixed(2)) : parseFloat((energy * tariffRate).toFixed(2));
+  const tariffRate = settings.tariffRate || 8.0;
+  const cost = parseFloat((energy * tariffRate).toFixed(2));
 
   const readingData = {
     deviceId,
@@ -39,6 +47,7 @@ export const processIncomingTelemetry = async (payload) => {
     frequency,
     powerFactor,
     cost,
+    isSimulated: Boolean(payload.isSimulated),
     timestamp: new Date(),
   };
 
@@ -119,14 +128,19 @@ export const getLiveReading = async (req, res) => {
     const device = await getDevice();
     const settings = await getSettings();
 
+    // Use toObject() if it's a Mongoose document so spread works correctly
+    const latestData = typeof latest.toObject === 'function' ? latest.toObject() : latest;
+    const deviceData = typeof device.toObject === 'function' ? device.toObject() : device;
+    const settingsData = typeof settings.toObject === 'function' ? settings.toObject() : settings;
+
     return res.status(200).json({
       success: true,
       data: {
-        ...latest,
-        tariffRate: settings.tariffRate,
-        relayState: device.relayState,
-        deviceOnline: device.status === 'online',
-        lastSeen: device.lastSeen,
+        ...latestData,
+        tariffRate: settingsData.tariffRate,
+        relayState: deviceData.relayState,
+        deviceOnline: deviceData.status === 'online',
+        lastSeen: deviceData.lastSeen,
       },
     });
   } catch (error) {
@@ -192,6 +206,7 @@ export const simulateReading = async (req, res) => {
       energy,
       frequency: 50.0,
       powerFactor: 0.98,
+      isSimulated: true,
     });
 
     return res.status(200).json({ success: true, reading, device });

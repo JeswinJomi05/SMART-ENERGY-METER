@@ -23,12 +23,16 @@ import SettingsView from './components/SettingsView';
 import ProfileView from './components/ProfileView';
 import MobileBottomNav from './components/MobileBottomNav';
 
-const BACKEND_URL = window.location.hostname === 'localhost' && window.location.port === '3000' ? '' : 'http://localhost:5000';
+const BACKEND_URL = 'http://127.0.0.1:5000';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('Dashboard');
-  const [isLiveSimulating, setIsLiveSimulating] = useState(true);
+  const [isLiveSimulating, setIsLiveSimulating] = useState(false); // Default to FALSE so real ESP32 readings are used
   const [simulationMode, setSimulationMode] = useState('normal'); // 'normal' | 'exact' | 'overload'
+  const [dataSource, setDataSource] = useState('esp32'); // 'esp32' | 'simulated'
+  const [espDevice, setEspDevice] = useState(null);
+  const [isPollingEsp, setIsPollingEsp] = useState(false);
+  const [pollError, setPollError] = useState(null);
   const [isMobilePreview, setIsMobilePreview] = useState(false);
   const [backendConnected, setBackendConnected] = useState(false);
   const [lastPacketTime, setLastPacketTime] = useState(null);
@@ -39,15 +43,23 @@ export default function App() {
   const [highVoltageLimit, setHighVoltageLimit] = useState(260);
   const [maxPowerLimit, setMaxPowerLimit] = useState(5000);
 
-  // Live Parameters state (default matches the screenshot exactly)
+  // Live Parameters state - initialized with 0 until ESP32 data arrives
   const [voltage, setVoltage] = useState(228);
-  const [current, setCurrent] = useState(8.4);
-  const [power, setPower] = useState(1955);
-  const [energyUsed, setEnergyUsed] = useState(12.8);
-  const [secondsAgo, setSecondsAgo] = useState(2);
+  const [current, setCurrent] = useState(0.0);
+  const [power, setPower] = useState(0);
+  const [energyUsed, setEnergyUsed] = useState(0.0);
+  const [secondsAgo, setSecondsAgo] = useState(0);
 
   // Dynamic cost calculation based on current energyUsed & tariffRate
   const totalCost = (energyUsed * tariffRate).toFixed(2);
+
+  // Seconds counter since last packet
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSecondsAgo((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Connect to MERN Backend via Socket.IO
   useEffect(() => {
@@ -55,12 +67,12 @@ export default function App() {
     try {
       socket = io(BACKEND_URL, {
         transports: ['websocket', 'polling'],
-        reconnectionAttempts: 10,
-        reconnectionDelay: 2000,
+        reconnectionAttempts: 20,
+        reconnectionDelay: 1500,
       });
 
       socket.on('connect', () => {
-        console.log('[MERN Socket.IO] Connected to backend on port 5000');
+        console.log('[MERN Socket.IO] Connected directly to backend on port 5000');
         setBackendConnected(true);
       });
 
@@ -69,18 +81,36 @@ export default function App() {
         setBackendConnected(false);
       });
 
+      socket.on('connect_error', (err) => {
+        console.warn('[Socket.IO] Connection error (retrying):', err.message);
+        setBackendConnected(false);
+      });
+
       // Receive real-time telemetry from ESP32 via backend
       socket.on('telemetry:live', (data) => {
         if (data && data.reading) {
           const r = data.reading;
-          setVoltage(Math.round(r.voltage));
-          setCurrent(parseFloat(r.current.toFixed(1)));
-          setPower(Math.round(r.power));
-          setEnergyUsed(parseFloat(r.energy.toFixed(1)));
+          setVoltage(typeof r.voltage === 'number' ? Number(r.voltage.toFixed(1)) : parseFloat(r.voltage) || 0);
+          setCurrent(typeof r.current === 'number' ? Number(r.current.toFixed(3)) : parseFloat(r.current) || 0);
+          setPower(typeof r.power === 'number' ? Number(r.power.toFixed(1)) : parseFloat(r.power) || 0);
+          setEnergyUsed(typeof r.energy === 'number' ? Number(r.energy.toFixed(4)) : parseFloat(r.energy) || 0);
           setSecondsAgo(0);
+          setLastPacketTime(new Date());
+
           if (data.tariffRate) setTariffRate(data.tariffRate);
-          if (data.deviceStatus && data.deviceStatus.relayState !== undefined) {
-            setRelayState(data.deviceStatus.relayState);
+          if (data.deviceStatus) {
+            setEspDevice(data.deviceStatus);
+            if (data.deviceStatus.relayState !== undefined) {
+              setRelayState(data.deviceStatus.relayState);
+            }
+          }
+
+          if (r.isSimulated) {
+            setDataSource('simulated');
+          } else {
+            setDataSource('esp32');
+            // If real ESP32 packet received, disable any running simulation
+            setIsLiveSimulating(false);
           }
         }
       });
@@ -101,17 +131,17 @@ export default function App() {
       .then((json) => {
         if (json.success && json.data) {
           const d = json.data;
-          setVoltage(Math.round(d.voltage));
-          setCurrent(parseFloat(d.current.toFixed(1)));
-          setPower(Math.round(d.power));
-          setEnergyUsed(parseFloat(d.energy.toFixed(1)));
+          if (d.voltage !== undefined) setVoltage(Number(Number(d.voltage).toFixed(1)));
+          if (d.current !== undefined) setCurrent(Number(Number(d.current).toFixed(3)));
+          if (d.power !== undefined) setPower(Number(Number(d.power).toFixed(1)));
+          if (d.energy !== undefined) setEnergyUsed(Number(Number(d.energy).toFixed(4)));
           if (d.tariffRate) setTariffRate(d.tariffRate);
           if (d.relayState !== undefined) setRelayState(d.relayState);
           setBackendConnected(true);
         }
       })
       .catch((err) => {
-        console.log('[Backend] Using internal simulation engine');
+        console.log('[Backend] Waiting for backend at ' + BACKEND_URL);
       });
 
     return () => {
@@ -119,56 +149,73 @@ export default function App() {
     };
   }, []);
 
-  // Live simulation tick engine (runs when backend simulation is enabled)
+  // Poll ESP32 directly via backend
+  const handlePollEsp32 = async () => {
+    setIsPollingEsp(true);
+    setPollError(null);
+    try {
+      const espIp = espDevice?.ipAddress || '192.168.1.145';
+      const res = await fetch(`${BACKEND_URL}/api/device/poll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: espIp }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed to poll ESP32');
+      setSecondsAgo(0);
+      setDataSource('esp32');
+      setIsLiveSimulating(false);
+    } catch (err) {
+      console.warn('[Poll ESP32] Error:', err.message);
+      setPollError(err.message);
+    } finally {
+      setIsPollingEsp(false);
+    }
+  };
+
+  // Live simulation tick engine - ONLY runs if user explicitly toggled simulation ON
   useEffect(() => {
     let timer;
     if (isLiveSimulating && relayState) {
       timer = setInterval(() => {
-        setSecondsAgo((prev) => {
-          if (prev >= 4) {
-            // Send pulse to backend if connected, or update state locally
-            if (simulationMode === 'normal') {
-              const newV = Math.round(227 + (Math.random() * 3 - 1));
-              const newA = parseFloat((8.3 + (Math.random() * 0.3 - 0.1)).toFixed(1));
-              const calculatedPower = Math.round(newV * newA * 0.98);
+        setSecondsAgo(0);
+        if (simulationMode === 'normal') {
+          const newV = Math.round(227 + (Math.random() * 3 - 1));
+          const newA = parseFloat((8.3 + (Math.random() * 0.3 - 0.1)).toFixed(1));
+          const calculatedPower = Math.round(newV * newA * 0.98);
 
-              // Notify backend simulator endpoint
-              fetch(`${BACKEND_URL}/api/telemetry/simulate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mode: 'normal' }),
-              }).catch(() => {});
+          fetch(`${BACKEND_URL}/api/telemetry/simulate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'normal' }),
+          }).catch(() => {});
 
-              setVoltage(newV);
-              setCurrent(newA);
-              setPower(calculatedPower);
-              setEnergyUsed((prevKwh) => parseFloat((prevKwh + 0.001).toFixed(2)));
-            } else if (simulationMode === 'overload') {
-              const newV = 222;
-              const newA = 19.4;
-              const calculatedPower = Math.round(newV * newA * 0.97);
+          setVoltage(newV);
+          setCurrent(newA);
+          setPower(calculatedPower);
+          setEnergyUsed((prevKwh) => parseFloat((prevKwh + 0.001).toFixed(3)));
+        } else if (simulationMode === 'overload') {
+          const newV = 222;
+          const newA = 19.4;
+          const calculatedPower = Math.round(newV * newA * 0.97);
 
-              fetch(`${BACKEND_URL}/api/telemetry/simulate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mode: 'overload' }),
-              }).catch(() => {});
+          fetch(`${BACKEND_URL}/api/telemetry/simulate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'overload' }),
+          }).catch(() => {});
 
-              setVoltage(newV);
-              setCurrent(newA);
-              setPower(calculatedPower);
-              setEnergyUsed((prevKwh) => parseFloat((prevKwh + 0.005).toFixed(2)));
-            } else {
-              setVoltage(228);
-              setCurrent(8.4);
-              setPower(1955);
-              setEnergyUsed(12.8);
-            }
-            return 1;
-          }
-          return prev + 1;
-        });
-      }, 1000);
+          setVoltage(newV);
+          setCurrent(newA);
+          setPower(calculatedPower);
+          setEnergyUsed((prevKwh) => parseFloat((prevKwh + 0.005).toFixed(3)));
+        } else {
+          setVoltage(228);
+          setCurrent(8.4);
+          setPower(1955);
+          setEnergyUsed(12.8);
+        }
+      }, 3000);
     }
 
     return () => clearInterval(timer);
@@ -264,45 +311,74 @@ export default function App() {
               <span>
                 Backend:{' '}
                 <strong style={{ color: backendConnected ? '#10b981' : '#f59e0b' }}>
-                  {backendConnected ? 'Node/Express Live (Port 5000)' : 'Local Engine'}
+                  {backendConnected ? 'Node/Express Live (Port 5000)' : 'Connecting...'}
                 </strong>
+              </span>
+
+              <span style={{
+                marginLeft: '10px',
+                fontSize: '12px',
+                fontWeight: 600,
+                padding: '2px 10px',
+                borderRadius: '12px',
+                background: dataSource === 'esp32' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(56, 189, 248, 0.15)',
+                color: dataSource === 'esp32' ? '#10b981' : '#38bdf8',
+                border: `1px solid ${dataSource === 'esp32' ? '#10b981' : '#38bdf8'}`,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+              }}>
+                <span style={{
+                  width: '7px',
+                  height: '7px',
+                  borderRadius: '50%',
+                  background: dataSource === 'esp32' ? '#10b981' : '#38bdf8',
+                }} />
+                {dataSource === 'esp32' ? (espDevice?.ipAddress ? `ESP32 (${espDevice.ipAddress})` : 'ESP32 Stream') : 'Simulator Mode'}
               </span>
             </div>
 
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <button
-                className={`control-btn ${simulationMode === 'exact' ? 'active' : ''}`}
-                onClick={resetToScreenshotValues}
-                title="Lock values to exact screenshot numbers"
-              >
-                <RotateCcw size={13} />
-                <span>Exact Image Match</span>
-              </button>
-
-              <button
-                className={`control-btn ${simulationMode === 'normal' ? 'active' : ''}`}
-                onClick={() => setSimulationMode('normal')}
-                title="Enable natural live micro-fluctuations"
-              >
-                <span>Live Fluctuations</span>
-              </button>
-
-              <button
-                className={`control-btn ${simulationMode === 'overload' ? 'active' : ''}`}
-                onClick={() => setSimulationMode('overload')}
-                title="Simulate high load scenario"
-              >
-                <AlertTriangle size={13} color="#f59e0b" />
-                <span>High Load Demo</span>
-              </button>
-
-              <button
                 className="control-btn"
+                onClick={handlePollEsp32}
+                disabled={isPollingEsp}
+                title="Fetch live data directly from ESP32 /data endpoint"
+                style={{ borderColor: '#10b981', color: '#10b981' }}
+              >
+                <RotateCcw size={13} className={isPollingEsp ? 'animate-spin' : ''} />
+                <span>{isPollingEsp ? 'Polling...' : 'Poll ESP32 Now'}</span>
+              </button>
+
+              <button
+                className={`control-btn ${isLiveSimulating ? 'active' : ''}`}
                 onClick={() => setIsLiveSimulating(!isLiveSimulating)}
+                title="Toggle simulator if ESP32 hardware is not powered on"
               >
                 {isLiveSimulating ? <Pause size={13} /> : <Play size={13} />}
-                <span>{isLiveSimulating ? 'Pause' : 'Resume'}</span>
+                <span>{isLiveSimulating ? 'Stop Simulator' : 'Test with Simulator'}</span>
               </button>
+
+              {isLiveSimulating && (
+                <>
+                  <button
+                    className={`control-btn ${simulationMode === 'exact' ? 'active' : ''}`}
+                    onClick={resetToScreenshotValues}
+                    title="Lock values to exact screenshot numbers"
+                  >
+                    <span>Exact Image</span>
+                  </button>
+
+                  <button
+                    className={`control-btn ${simulationMode === 'overload' ? 'active' : ''}`}
+                    onClick={() => setSimulationMode('overload')}
+                    title="Simulate high load scenario"
+                  >
+                    <AlertTriangle size={13} color="#f59e0b" />
+                    <span>Overload Demo</span>
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -313,7 +389,7 @@ export default function App() {
               <HeroCard
                 totalCost={totalCost}
                 power={power.toLocaleString()}
-                energyUsed={energyUsed.toFixed(1)}
+                energyUsed={energyUsed < 1 && energyUsed > 0 ? energyUsed.toFixed(3) : energyUsed.toFixed(2)}
               />
 
               {/* Live Parameters Section */}
@@ -321,7 +397,7 @@ export default function App() {
                 <div className="section-header-row">
                   <div className="section-title">
                     <Activity size={20} />
-                    <span>Live Parameters</span>
+                    <span>Live Parameters {dataSource === 'esp32' ? '(ESP32 Hardware)' : '(Simulated)'}</span>
                   </div>
 
                   <div className="realtime-pill-badge">
@@ -349,7 +425,7 @@ export default function App() {
                     title="Current"
                     type="current"
                     icon={<Activity size={18} />}
-                    value={current.toFixed(1)}
+                    value={current < 1 && current > 0 ? current.toFixed(3) : current.toFixed(2)}
                     unit="A"
                     percentage={currentPercent}
                     maxReference="(of 30 A)"
@@ -379,7 +455,7 @@ export default function App() {
                         <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/>
                       </svg>
                     }
-                    value={energyUsed.toFixed(1)}
+                    value={energyUsed < 1 && energyUsed > 0 ? energyUsed.toFixed(3) : energyUsed.toFixed(2)}
                     unit="kWh"
                     percentage={energyPercent}
                     maxReference="(of 50 kWh)"
@@ -392,10 +468,14 @@ export default function App() {
               <section className="bottom-cards-grid">
                 {/* 1. Device Status */}
                 <DeviceStatusCard
-                  isConnected={relayState}
+                  isConnected={backendConnected && relayState}
                   lastUpdatedSeconds={secondsAgo}
-                  autoRefresh={isLiveSimulating}
-                  onRefresh={() => setSecondsAgo(0)}
+                  autoRefresh={!isLiveSimulating}
+                  onRefresh={handlePollEsp32}
+                  onPoll={handlePollEsp32}
+                  isPolling={isPollingEsp}
+                  espDevice={espDevice}
+                  dataSource={dataSource}
                 />
 
                 {/* 2. Energy Usage Trend Chart */}
@@ -405,7 +485,7 @@ export default function App() {
                 <QuickInfoCard
                   tariffRate={tariffRate.toFixed(2)}
                   totalCost={totalCost}
-                  energyUsed={energyUsed.toFixed(1)}
+                  energyUsed={energyUsed < 1 && energyUsed > 0 ? energyUsed.toFixed(3) : energyUsed.toFixed(2)}
                   currentPower={power.toLocaleString()}
                 />
               </section>
