@@ -22,8 +22,7 @@ import HistoryView from './components/HistoryView';
 import SettingsView from './components/SettingsView';
 import ProfileView from './components/ProfileView';
 import MobileBottomNav from './components/MobileBottomNav';
-
-const BACKEND_URL = 'http://127.0.0.1:5000';
+import { BACKEND_URL, API_BASE } from './services/api';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('Dashboard');
@@ -65,14 +64,21 @@ export default function App() {
   useEffect(() => {
     let socket;
     try {
-      socket = io(BACKEND_URL, {
-        transports: ['websocket', 'polling'],
-        reconnectionAttempts: 20,
-        reconnectionDelay: 1500,
-      });
+      const socketTarget = BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+      socket = socketTarget
+        ? io(socketTarget, {
+            transports: ['websocket', 'polling'],
+            reconnectionAttempts: 20,
+            reconnectionDelay: 1500,
+          })
+        : io({
+            transports: ['websocket', 'polling'],
+            reconnectionAttempts: 20,
+            reconnectionDelay: 1500,
+          });
 
       socket.on('connect', () => {
-        console.log('[MERN Socket.IO] Connected directly to backend on port 5000');
+        console.log('[MERN Socket.IO] Connected to backend at', socketTarget || 'current origin');
         setBackendConnected(true);
       });
 
@@ -126,7 +132,7 @@ export default function App() {
     }
 
     // Fetch initial state from backend REST API
-    fetch(`${BACKEND_URL}/api/telemetry/live`)
+    fetch(`${API_BASE}/telemetry/live`)
       .then((res) => res.json())
       .then((json) => {
         if (json.success && json.data) {
@@ -141,7 +147,7 @@ export default function App() {
         }
       })
       .catch((err) => {
-        console.log('[Backend] Waiting for backend at ' + BACKEND_URL);
+        console.log('[Backend] Waiting for backend at ' + (BACKEND_URL || API_BASE));
       });
 
     return () => {
@@ -155,7 +161,7 @@ export default function App() {
     setPollError(null);
     try {
       const espIp = espDevice?.ipAddress || '192.168.1.145';
-      const res = await fetch(`${BACKEND_URL}/api/device/poll`, {
+      const res = await fetch(`${API_BASE}/device/poll`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ip: espIp }),
@@ -184,7 +190,7 @@ export default function App() {
           const newA = parseFloat((8.3 + (Math.random() * 0.3 - 0.1)).toFixed(1));
           const calculatedPower = Math.round(newV * newA * 0.98);
 
-          fetch(`${BACKEND_URL}/api/telemetry/simulate`, {
+          fetch(`${API_BASE}/telemetry/simulate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mode: 'normal' }),
@@ -199,7 +205,7 @@ export default function App() {
           const newA = 19.4;
           const calculatedPower = Math.round(newV * newA * 0.97);
 
-          fetch(`${BACKEND_URL}/api/telemetry/simulate`, {
+          fetch(`${API_BASE}/telemetry/simulate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mode: 'overload' }),
@@ -225,7 +231,7 @@ export default function App() {
   const handleToggleRelay = async (newState) => {
     setRelayState(newState);
     try {
-      await fetch(`${BACKEND_URL}/api/device/relay`, {
+      await fetch(`${API_BASE}/device/relay`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ relayState: newState }),
@@ -239,7 +245,7 @@ export default function App() {
   const handleUpdateTariff = async (newRate) => {
     setTariffRate(newRate);
     try {
-      await fetch(`${BACKEND_URL}/api/settings`, {
+      await fetch(`${API_BASE}/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tariffRate: newRate }),
@@ -311,7 +317,7 @@ export default function App() {
               <span>
                 Backend:{' '}
                 <strong style={{ color: backendConnected ? '#10b981' : '#f59e0b' }}>
-                  {backendConnected ? 'Node/Express Live (Port 5000)' : 'Connecting...'}
+                  {backendConnected ? (BACKEND_URL ? 'Node/Express Live' : 'Live (Port 5000)') : 'Connecting / Standalone'}
                 </strong>
               </span>
 

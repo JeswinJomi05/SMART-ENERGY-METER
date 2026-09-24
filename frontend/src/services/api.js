@@ -1,7 +1,12 @@
 import { io } from 'socket.io-client';
 
-// Base API endpoints (uses Vite proxy in dev, direct URL in production)
-const API_BASE = '/api';
+// Base API endpoints (supports Vite VITE_API_URL for production/Vercel)
+export const BACKEND_URL = (
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? 'http://127.0.0.1:5000' : '')
+).replace(/\/+$/, '');
+
+export const API_BASE = BACKEND_URL ? `${BACKEND_URL}/api` : '/api';
 
 export const fetchLiveTelemetry = async () => {
   const res = await fetch(`${API_BASE}/telemetry/live`);
@@ -62,7 +67,7 @@ export const toggleRelayAPI = async (relayState) => {
 
 // Ask the MERN backend to fetch data from the ESP32's /data endpoint right now
 export const pollEsp32ViaBackend = async (espIp) => {
-  const res = await fetch('/api/device/poll', {
+  const res = await fetch(`${API_BASE}/device/poll`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ip: espIp }),
@@ -91,13 +96,21 @@ export const triggerSimulateAPI = async (mode = 'normal') => {
 
 // WebSocket Service with Socket.IO
 export const setupSocketConnection = ({ onTelemetry, onRelay, onAlert, onStatusChange }) => {
-  // Connect via current origin or direct port 5000 fallback
-  const socket = io({
-    transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionAttempts: 15,
-    reconnectionDelay: 1500,
-  });
+  // Connect via BACKEND_URL or current origin
+  const socketTarget = BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+  const socket = socketTarget
+    ? io(socketTarget, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 15,
+        reconnectionDelay: 1500,
+      })
+    : io({
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 15,
+        reconnectionDelay: 1500,
+      });
 
   socket.on('connect', () => {
     console.log('[WebSocket] Connected to Smart Energy Meter backend!');
