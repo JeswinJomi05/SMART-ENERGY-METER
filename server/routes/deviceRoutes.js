@@ -9,4 +9,6 @@ const router = express.Router();
 
 router.get('/status', getDeviceStatus);
 router.post('/relay', toggleRelay);
-router.post
+router.post('/poll', pollEsp32);
+
+export default router;

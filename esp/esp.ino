@@ -4,6 +4,7 @@
 
        ESP32 + ZMPT101B + ACS712 + BLYNK + 16x2 I2C LCD
        + HTTP/JSON API FOR REACT WEBSITE
+       + HTTP POST TO MERN BACKEND SERVER
   ============================================================
 
   ESP32
@@ -18,17 +19,26 @@
   VCC       -> 5V
   GND       -> GND
 
-  HTTP API
+  HTTP API (local - unchanged)
   --------
   http://ESP32_IP/data
 
-  Example:
+  HTTP POST (to MERN backend)
+  ---------------------------
+  POST http://SERVER_IP:5000/api/telemetry
+
+  Example Payload Sent:
   {
+    "deviceId": "ESP32-SMART-METER-IND-7782",
     "voltage": 230.4,
     "current": 0.052,
     "power": 11.98,
     "energy": 0.00125,
-    "bill": 0.0081
+    "bill": 0.0081,
+    "tariff": 10000,
+    "frequency": 50.0,
+    "powerFactor": 0.98,
+    "ipAddress": "192.168.1.x"
   }
 
   BLYNK IS NOT REMOVED.
@@ -45,6 +55,7 @@
 #include <WiFi.h>
 #include <BlynkSimpleEsp32.h>
 #include <WebServer.h>
+#include <HTTPClient.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <math.h>
@@ -57,7 +68,19 @@ char ssid[] = "YOUR_WIFI_NAME";
 char pass[] = "YOUR_WIFI_PASSWORD";
 
 // ============================================================
-// HTTP SERVER
+// MERN BACKEND SERVER
+// ============================================================
+//
+// Set this to your computer's local Wi-Fi IP address.
+// Run `ipconfig` in Windows CMD to find it.
+// Example: 192.168.1.100
+//
+const char* BACKEND_SERVER_IP   = "192.167.2.31";
+const int   BACKEND_SERVER_PORT = 5000;
+const char* BACKEND_TELEMETRY_ENDPOINT = "/api/telemetry";
+
+// ============================================================
+// HTTP SERVER (local /data endpoint - unchanged)
 // ============================================================
 
 WebServer server(80);
@@ -129,6 +152,14 @@ float billAmount = 0.0;
 // ============================================================
 
 unsigned long previousMeasurementMillis = 0;
+
+// ============================================================
+// BACKEND POST TIMING
+// ============================================================
+
+unsigned long previousBackendMillis = 0;
+const unsigned long BACKEND_INTERVAL_MS = 3000; // POST every 3 seconds
+bool backendPostSuccess = false;
 
 // ============================================================
 // LCD VARIABLES
@@ -335,8 +366,30 @@ void lcdBill()
     lcd.print(billAmount, 4);
 }
 
+// ------------------------------------------------------------
+// NEW: Show backend connection status on LCD screen 4
+// ------------------------------------------------------------
+
+void lcdServerStatus()
+{
+    lcd.clear();
+
+    lcd.setCursor(0, 0);
+    lcd.print("Server:");
+
+    lcd.setCursor(0, 1);
+    if (backendPostSuccess)
+    {
+        lcd.print("Posted OK!");
+    }
+    else
+    {
+        lcd.print("Conn Failed");
+    }
+}
+
 // ============================================================
-// HTTP: SEND JSON DATA
+// HTTP: SEND JSON DATA (local endpoint - unchanged)
 // ============================================================
 
 void handleData()
@@ -382,6 +435,15 @@ void handleData()
     json += ",\"tariff\":";
     json += String(TARIFF, 2);
 
+    json += ",\"frequency\":50.0";
+    json += ",\"powerFactor\":0.98";
+
+    json += ",\"deviceId\":\"ESP32-SMART-METER-IND-7782\"";
+
+    json += ",\"ipAddress\":\"";
+    json += WiFi.localIP().toString();
+    json += "\"";
+
     json += "}";
 
     // --------------------------------------------------------
@@ -423,6 +485,9 @@ void handleStatus()
     json += "\",\"ip\":\"";
     json += WiFi.localIP().toString();
     json += "\"";
+
+    json += ",\"backendConnected\":";
+    json += backendPostSuccess ? "true" : "false";
 
     json += "}";
 
@@ -523,15 +588,111 @@ void startHTTPServer()
     Serial.println(WiFi.localIP());
 
     Serial.println();
-    Serial.print("Data URL: http://");
+    Serial.print("Local Data URL: http://");
     Serial.print(WiFi.localIP());
     Serial.println("/data");
 
-    Serial.print("Status URL: http://");
-    Serial.print(WiFi.localIP());
-    Serial.println("/status");
+    Serial.print("Backend POST: http://");
+    Serial.print(BACKEND_SERVER_IP);
+    Serial.print(":");
+    Serial.print(BACKEND_SERVER_PORT);
+    Serial.println(BACKEND_TELEMETRY_ENDPOINT);
 
     Serial.println("========================================");
+}
+
+// ============================================================
+// NEW FUNCTION: POST TELEMETRY TO MERN BACKEND
+// ============================================================
+
+void postToBackend()
+{
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println("[BACKEND] WiFi not connected. Skipping POST.");
+        backendPostSuccess = false;
+        return;
+    }
+
+    HTTPClient http;
+
+    String url = "http://";
+    url += BACKEND_SERVER_IP;
+    url += ":";
+    url += String(BACKEND_SERVER_PORT);
+    url += BACKEND_TELEMETRY_ENDPOINT;
+
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    http.setTimeout(3000); // 3 second timeout
+
+    // --------------------------------------------------------
+    // Build JSON payload exactly matching the backend schema
+    // --------------------------------------------------------
+
+    String payload = "{";
+
+    payload += "\"deviceId\":\"ESP32-SMART-METER-IND-7782\"";
+
+    payload += ",\"voltage\":";
+    payload += String(voltageRMS, 2);
+
+    payload += ",\"current\":";
+    payload += String(currentRMS, 3);
+
+    payload += ",\"power\":";
+    payload += String(powerW, 2);
+
+    payload += ",\"energy\":";
+    payload += String(energyKWh, 6);
+
+    payload += ",\"bill\":";
+    payload += String(billAmount, 6);
+
+    payload += ",\"tariff\":";
+    payload += String(TARIFF, 2);
+
+    payload += ",\"frequency\":50.0";
+
+    payload += ",\"powerFactor\":0.98";
+
+    payload += ",\"ipAddress\":\"";
+    payload += WiFi.localIP().toString();
+    payload += "\"";
+
+    payload += "}";
+
+    // --------------------------------------------------------
+    // Send the POST request
+    // --------------------------------------------------------
+
+    int httpCode = http.POST(payload);
+
+    if (httpCode > 0)
+    {
+        backendPostSuccess = true;
+
+        String response = http.getString();
+
+        Serial.println();
+        Serial.println("[BACKEND] POST successful!");
+        Serial.print("[BACKEND] HTTP Code: ");
+        Serial.println(httpCode);
+        Serial.print("[BACKEND] Response: ");
+        Serial.println(response);
+    }
+    else
+    {
+        backendPostSuccess = false;
+
+        Serial.println();
+        Serial.print("[BACKEND] POST failed. Error: ");
+        Serial.println(http.errorToString(httpCode));
+        Serial.print("[BACKEND] URL was: ");
+        Serial.println(url);
+    }
+
+    http.end();
 }
 
 // ============================================================
@@ -651,7 +812,7 @@ void setup()
     lcd.print("WiFi Connected");
 
     lcd.setCursor(0, 1);
-    lcd.print("Blynk + HTTP");
+    lcd.print("Blynk+HTTP+API");
 
     delay(2000);
 
@@ -663,10 +824,14 @@ void setup()
 
     Serial.println("ESP32 initialized.");
     Serial.println("System ready.");
+    Serial.print("Backend server: http://");
+    Serial.print(BACKEND_SERVER_IP);
+    Serial.print(":");
+    Serial.println(BACKEND_SERVER_PORT);
 
     previousMeasurementMillis = millis();
-
     previousLCDMillis = millis();
+    previousBackendMillis = millis();
 }
 
 // ============================================================
@@ -812,11 +977,31 @@ void loop()
         Serial.print("Bill    : Rs.");
         Serial.println(billAmount, 6);
 
-        Serial.print("HTTP    : http://");
+        Serial.print("Local   : http://");
         Serial.print(WiFi.localIP());
         Serial.println("/data");
 
+        Serial.print("Backend : http://");
+        Serial.print(BACKEND_SERVER_IP);
+        Serial.print(":");
+        Serial.print(BACKEND_SERVER_PORT);
+        Serial.println(BACKEND_TELEMETRY_ENDPOINT);
+
         Serial.println("----------------------------------------");
+    }
+
+    // ========================================================
+    // POST TO MERN BACKEND EVERY 3 SECONDS
+    // ========================================================
+
+    if (
+        currentMillis -
+        previousBackendMillis >= BACKEND_INTERVAL_MS
+    )
+    {
+        previousBackendMillis = currentMillis;
+
+        postToBackend();
     }
 
     // ========================================================
@@ -834,7 +1019,7 @@ void loop()
 
         lcdScreen++;
 
-        if (lcdScreen > 3)
+        if (lcdScreen > 4)
         {
             lcdScreen = 0;
         }
@@ -859,5 +1044,9 @@ void loop()
     else if (lcdScreen == 3)
     {
         lcdBill();
+    }
+    else if (lcdScreen == 4)
+    {
+        lcdServerStatus();
     }
 }

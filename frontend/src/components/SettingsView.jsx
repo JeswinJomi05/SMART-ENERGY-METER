@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Settings, ShieldAlert, Cpu, Bell, Power, Save, Check } from 'lucide-react';
-import { updateSettingsAPI } from '../services/api';
+import { Settings, ShieldAlert, Cpu, Bell, Power, Save, Check, Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import { updateSettingsAPI, fetchEsp32Directly } from '../services/api';
 
 export default function SettingsView({
   tariffRate,
@@ -16,6 +16,8 @@ export default function SettingsView({
   const [espIp, setEspIp] = useState('192.168.1.145');
   const [mqttTopic, setMqttTopic] = useState('home/esp32/meter_01/tele');
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [espTestStatus, setEspTestStatus] = useState(null); // null | 'testing' | 'ok' | 'fail'
+  const [espLiveData, setEspLiveData] = useState(null);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -32,6 +34,19 @@ export default function SettingsView({
       // Still show local success
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
+    }
+  };
+
+  const handleTestEsp32 = async () => {
+    setEspTestStatus('testing');
+    setEspLiveData(null);
+    try {
+      const data = await fetchEsp32Directly(espIp);
+      setEspLiveData(data);
+      setEspTestStatus('ok');
+    } catch (err) {
+      setEspTestStatus('fail');
+      console.warn('[ESP32 Test] Could not reach ESP32:', err.message);
     }
   };
 
@@ -255,6 +270,64 @@ export default function SettingsView({
               />
             </div>
           </div>
+        </div>
+
+        {/* ESP32 Live Connection Test */}
+        <div className="info-card">
+          <div className="info-card-header">
+            <div className="info-card-header-icon green">
+              <Wifi size={16} />
+            </div>
+            <h3>ESP32 Live Connection Test</h3>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: '200px' }}>
+              <p style={{ fontSize: '13px', color: '#94a3b8', lineHeight: 1.6 }}>
+                Click <strong style={{ color: '#fff' }}>Test Connection</strong> to directly fetch live sensor
+                data from your ESP32 at <code style={{ color: '#00b4d8' }}>{espIp}/data</code>.
+                Your ESP32 must be on the same Wi-Fi network as this browser.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleTestEsp32}
+              className="control-btn"
+              style={{
+                background: espTestStatus === 'ok' ? 'rgba(16,185,129,0.18)' : espTestStatus === 'fail' ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.06)',
+                borderColor: espTestStatus === 'ok' ? '#10b981' : espTestStatus === 'fail' ? '#ef4444' : 'rgba(255,255,255,0.12)',
+                color: espTestStatus === 'ok' ? '#10b981' : espTestStatus === 'fail' ? '#ef4444' : '#e2e8f0',
+                padding: '10px 20px', fontSize: '13px', fontWeight: 600,
+              }}
+            >
+              {espTestStatus === 'testing' ? <RefreshCw size={15} /> :
+               espTestStatus === 'ok' ? <Wifi size={15} /> :
+               espTestStatus === 'fail' ? <WifiOff size={15} /> : <Wifi size={15} />}
+              <span>
+                {espTestStatus === 'testing' ? 'Connecting...' :
+                 espTestStatus === 'ok' ? 'ESP32 Reachable!' :
+                 espTestStatus === 'fail' ? 'Connection Failed' : 'Test ESP32 Connection'}
+              </span>
+            </button>
+          </div>
+
+          {espLiveData && (
+            <div style={{ marginTop: '16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
+              {[
+                { label: 'Voltage', value: `${parseFloat(espLiveData.voltage).toFixed(1)} V`, color: '#00b4d8' },
+                { label: 'Current', value: `${parseFloat(espLiveData.current).toFixed(3)} A`, color: '#00e599' },
+                { label: 'Power', value: `${parseFloat(espLiveData.power).toFixed(1)} W`, color: '#ff9f1c' },
+                { label: 'Energy', value: `${parseFloat(espLiveData.energy).toFixed(5)} kWh`, color: '#d946ef' },
+                { label: 'Bill (Rs.)', value: parseFloat(espLiveData.bill).toFixed(4), color: '#38bdf8' },
+              ].map((item) => (
+                <div key={item.label} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '10px', padding: '12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>{item.label}</div>
+                  <div style={{ fontSize: '17px', fontWeight: 700, color: item.color }}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Save Button */}

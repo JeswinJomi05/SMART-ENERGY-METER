@@ -60,6 +60,25 @@ export const toggleRelayAPI = async (relayState) => {
   return json.data;
 };
 
+// Ask the MERN backend to fetch data from the ESP32's /data endpoint right now
+export const pollEsp32ViaBackend = async (espIp) => {
+  const res = await fetch('/api/device/poll', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ip: espIp }),
+  });
+  if (!res.ok) throw new Error('Backend poll of ESP32 failed');
+  return await res.json();
+};
+
+// Fetch directly from ESP32 /data endpoint (browser to ESP32 directly, same network)
+export const fetchEsp32Directly = async (espIp) => {
+  const cleanIp = espIp.replace(/^\/+/, '').replace(/^https?:\/\//, '');
+  const res = await fetch(`http://${cleanIp}/data`, { signal: AbortSignal.timeout(3500) });
+  if (!res.ok) throw new Error(`ESP32 returned HTTP ${res.status}`);
+  return await res.json();
+};
+
 export const triggerSimulateAPI = async (mode = 'normal') => {
   const res = await fetch(`${API_BASE}/telemetry/simulate`, {
     method: 'POST',

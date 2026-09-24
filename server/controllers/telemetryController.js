@@ -187,4 +187,15 @@ export const simulateReading = async (req, res) => {
 
     const { reading, device } = await processIncomingTelemetry({
       voltage: v,
-      current
+      current: a,
+      power,
+      energy,
+      frequency: 50.0,
+      powerFactor: 0.98,
+    });
+
+    return res.status(200).json({ success: true, reading, device });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
