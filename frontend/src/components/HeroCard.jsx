@@ -37,7 +37,7 @@ export default function HeroCard({
       {/* Left Cost Section */}
       <div className="hero-left-section">
         <div className="wallet-badge-icon">
-          <Wallet size={28} />
+          <Wallet size={26} />
         </div>
         <div className="hero-cost-info">
           <h4>Total Electricity Cost</h4>
@@ -49,18 +49,31 @@ export default function HeroCard({
         </div>
       </div>
 
-      {/* Center Floating Bolt */}
+      {/* Center Floating Bolt for Desktop */}
       <div className="hero-center-badge">
         <div className="floating-bolt-glow">
-          <Zap size={28} fill="white" strokeWidth={1} />
+          <Zap size={26} fill="white" strokeWidth={1} />
         </div>
       </div>
 
-      {/* Right Metrics Column */}
+      {/* Mobile House Graphic */}
+      <div className="hero-mobile-house">
+        <svg width="60" height="46" viewBox="0 0 68 52" fill="none">
+          <path d="M34 6L54 22H14L34 6Z" fill="#1e3a8a" opacity="0.8" />
+          <rect x="20" y="22" width="28" height="24" rx="2" fill="#0f172a" stroke="#38bdf8" strokeWidth="1" />
+          <rect x="30" y="32" width="8" height="14" fill="#1e293b" />
+          <rect x="38" y="26" width="6" height="6" rx="1" fill="#38bdf8" opacity="0.4" />
+          <path d="M34 2L30 14H36L32 24L42 12H35L38 2H34Z" fill="#38bdf8" />
+        </svg>
+      </div>
+
+      <div className="hero-divider-line" />
+
+      {/* Right Metrics Column (Desktop) / Bottom Row (Mobile) */}
       <div className="hero-right-metrics">
         <div className="hero-metric-item">
           <div className="hero-metric-icon-wrap power">
-            <Zap size={20} fill="#f59e0b" />
+            <Zap size={18} fill="#f59e0b" />
           </div>
           <div className="hero-metric-texts">
             <div className="metric-label">Power</div>
@@ -72,7 +85,7 @@ export default function HeroCard({
 
         <div className="hero-metric-item">
           <div className="hero-metric-icon-wrap energy">
-            <Leaf size={20} fill="#10b981" />
+            <Leaf size={18} fill="#10b981" />
           </div>
           <div className="hero-metric-texts">
             <div className="metric-label">Energy Used</div>
@@ -83,3 +96,4 @@ export default function HeroCard({
     </div>
   );
 }
+

@@ -1,12 +1,47 @@
 import { io } from 'socket.io-client';
 
+// Sanitize backend URL (auto-corrects accidental Vercel dashboard URLs and strips trailing slashes)
+export const sanitizeBackendUrl = (rawUrl) => {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  let url = rawUrl.trim().replace(/\/+$/, '');
+
+  // Detect accidental copy-paste of Vercel dashboard URL:
+  // e.g. https://vercel.com/jeswinjomi05s-projects/smart-energy-meter-backend
+  const vercelDashboardMatch = url.match(/^https?:\/\/vercel\.com\/[^/]+\/([^/?#]+)/i);
+  if (vercelDashboardMatch) {
+    const projectName = vercelDashboardMatch[1];
+    const corrected = `https://${projectName}.vercel.app`;
+    console.warn(
+      `[Smart Meter] Detected Vercel dashboard URL in VITE_API_URL: "${url}". Auto-correcting to deployment domain: "${corrected}". Please update your Vercel Project Settings > Environment Variables with this correct URL.`
+    );
+    url = corrected;
+  }
+  return url;
+};
+
 // Base API endpoints (supports Vite VITE_API_URL for production/Vercel)
-export const BACKEND_URL = (
+export const BACKEND_URL = sanitizeBackendUrl(
   import.meta.env.VITE_API_URL ||
   (import.meta.env.DEV ? 'http://127.0.0.1:5000' : '')
-).replace(/\/+$/, '');
+);
 
 export const API_BASE = BACKEND_URL ? `${BACKEND_URL}/api` : '/api';
+
+// Returns valid Socket.IO target URL, or null if running on static host with no backend URL configured
+export const getSocketTarget = () => {
+  if (BACKEND_URL) {
+    return BACKEND_URL;
+  }
+  // In local dev, Vite proxy forwards /socket.io to localhost:5000
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return window.location.origin;
+    }
+  }
+  // In production with no backend URL, return null so we don't spam the static host with WebSocket errors
+  return null;
+};
 
 export const fetchLiveTelemetry = async () => {
   const res = await fetch(`${API_BASE}/telemetry/live`);
@@ -96,24 +131,23 @@ export const triggerSimulateAPI = async (mode = 'normal') => {
 
 // WebSocket Service with Socket.IO
 export const setupSocketConnection = ({ onTelemetry, onRelay, onAlert, onStatusChange }) => {
-  // Connect via BACKEND_URL or current origin
-  const socketTarget = BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : '');
-  const socket = socketTarget
-    ? io(socketTarget, {
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionAttempts: 15,
-        reconnectionDelay: 1500,
-      })
-    : io({
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionAttempts: 15,
-        reconnectionDelay: 1500,
-      });
+  const socketTarget = getSocketTarget();
+
+  if (!socketTarget) {
+    console.info('[WebSocket] Real-time WebSocket to static host skipped (no backend URL configured). Using HTTP polling fallback.');
+    if (onStatusChange) onStatusChange(false);
+    return null;
+  }
+
+  const socket = io(socketTarget, {
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionAttempts: 15,
+    reconnectionDelay: 2000,
+  });
 
   socket.on('connect', () => {
-    console.log('[WebSocket] Connected to Smart Energy Meter backend!');
+    console.log('[WebSocket] Connected to Smart Energy Meter backend at', socketTarget);
     if (onStatusChange) onStatusChange(true);
   });
 

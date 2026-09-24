@@ -22,7 +22,7 @@ import HistoryView from './components/HistoryView';
 import SettingsView from './components/SettingsView';
 import ProfileView from './components/ProfileView';
 import MobileBottomNav from './components/MobileBottomNav';
-import { BACKEND_URL, API_BASE } from './services/api';
+import { BACKEND_URL, API_BASE, getSocketTarget } from './services/api';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('Dashboard');
@@ -34,6 +34,7 @@ export default function App() {
   const [pollError, setPollError] = useState(null);
   const [isMobilePreview, setIsMobilePreview] = useState(false);
   const [backendConnected, setBackendConnected] = useState(false);
+  const [isWsConnected, setIsWsConnected] = useState(false);
   const [lastPacketTime, setLastPacketTime] = useState(null);
 
   // Meter configuration state
@@ -60,81 +61,90 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Connect to MERN Backend via Socket.IO
+  // Connect to MERN Backend via Socket.IO (if backend URL is configured)
   useEffect(() => {
     let socket;
-    try {
-      const socketTarget = BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : '');
-      socket = socketTarget
-        ? io(socketTarget, {
-            transports: ['websocket', 'polling'],
-            reconnectionAttempts: 20,
-            reconnectionDelay: 1500,
-          })
-        : io({
-            transports: ['websocket', 'polling'],
-            reconnectionAttempts: 20,
-            reconnectionDelay: 1500,
-          });
+    const socketTarget = getSocketTarget();
 
-      socket.on('connect', () => {
-        console.log('[MERN Socket.IO] Connected to backend at', socketTarget || 'current origin');
-        setBackendConnected(true);
-      });
+    if (socketTarget) {
+      try {
+        socket = io(socketTarget, {
+          transports: ['websocket', 'polling'],
+          reconnectionAttempts: 15,
+          reconnectionDelay: 2000,
+        });
 
-      socket.on('disconnect', () => {
-        console.log('[MERN Socket.IO] Disconnected from backend');
-        setBackendConnected(false);
-      });
+        socket.on('connect', () => {
+          console.log('[MERN Socket.IO] Connected to backend at', socketTarget);
+          setIsWsConnected(true);
+          setBackendConnected(true);
+        });
 
-      socket.on('connect_error', (err) => {
-        console.warn('[Socket.IO] Connection error (retrying):', err.message);
-        setBackendConnected(false);
-      });
+        socket.on('disconnect', () => {
+          console.log('[MERN Socket.IO] Disconnected from backend');
+          setIsWsConnected(false);
+        });
 
-      // Receive real-time telemetry from ESP32 via backend
-      socket.on('telemetry:live', (data) => {
-        if (data && data.reading) {
-          const r = data.reading;
-          setVoltage(typeof r.voltage === 'number' ? Number(r.voltage.toFixed(1)) : parseFloat(r.voltage) || 0);
-          setCurrent(typeof r.current === 'number' ? Number(r.current.toFixed(3)) : parseFloat(r.current) || 0);
-          setPower(typeof r.power === 'number' ? Number(r.power.toFixed(1)) : parseFloat(r.power) || 0);
-          setEnergyUsed(typeof r.energy === 'number' ? Number(r.energy.toFixed(4)) : parseFloat(r.energy) || 0);
-          setSecondsAgo(0);
-          setLastPacketTime(new Date());
+        socket.on('connect_error', (err) => {
+          console.warn('[Socket.IO] Connection error (retrying):', err.message);
+          setIsWsConnected(false);
+        });
 
-          if (data.tariffRate) setTariffRate(data.tariffRate);
-          if (data.deviceStatus) {
-            setEspDevice(data.deviceStatus);
-            if (data.deviceStatus.relayState !== undefined) {
-              setRelayState(data.deviceStatus.relayState);
+        // Receive real-time telemetry from ESP32 via backend
+        socket.on('telemetry:live', (data) => {
+          if (data && data.reading) {
+            const r = data.reading;
+            setVoltage(typeof r.voltage === 'number' ? Number(r.voltage.toFixed(1)) : parseFloat(r.voltage) || 0);
+            setCurrent(typeof r.current === 'number' ? Number(r.current.toFixed(3)) : parseFloat(r.current) || 0);
+            setPower(typeof r.power === 'number' ? Number(r.power.toFixed(1)) : parseFloat(r.power) || 0);
+            setEnergyUsed(typeof r.energy === 'number' ? Number(r.energy.toFixed(4)) : parseFloat(r.energy) || 0);
+            setSecondsAgo(0);
+            setLastPacketTime(new Date());
+
+            if (data.tariffRate) setTariffRate(data.tariffRate);
+            if (data.deviceStatus) {
+              setEspDevice(data.deviceStatus);
+              if (data.deviceStatus.relayState !== undefined) {
+                setRelayState(data.deviceStatus.relayState);
+              }
+            }
+
+            if (r.isSimulated) {
+              setDataSource('simulated');
+            } else {
+              setDataSource('esp32');
+              setIsLiveSimulating(false);
             }
           }
+        });
 
-          if (r.isSimulated) {
-            setDataSource('simulated');
-          } else {
-            setDataSource('esp32');
-            // If real ESP32 packet received, disable any running simulation
-            setIsLiveSimulating(false);
+        // Receive remote relay switch events
+        socket.on('device:relay', (data) => {
+          if (data && data.relayState !== undefined) {
+            setRelayState(data.relayState);
           }
-        }
-      });
-
-      // Receive remote relay switch events
-      socket.on('device:relay', (data) => {
-        if (data && data.relayState !== undefined) {
-          setRelayState(data.relayState);
-        }
-      });
-    } catch (e) {
-      console.warn('[Socket.IO] Connection error:', e);
+        });
+      } catch (e) {
+        console.warn('[Socket.IO] Initialization error:', e);
+      }
+    } else {
+      console.info('[App] WebSocket to static host skipped. Real-time updates active via HTTP polling.');
     }
 
-    // Fetch initial state from backend REST API
-    fetch(`${API_BASE}/telemetry/live`)
-      .then((res) => res.json())
-      .then((json) => {
+    return () => {
+      if (socket) socket.disconnect();
+    };
+  }, []);
+
+  // HTTP Polling fallback: polls /api/telemetry/live every 3s when Socket.IO is inactive
+  useEffect(() => {
+    let timer;
+
+    const fetchLiveState = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/telemetry/live`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
         if (json.success && json.data) {
           const d = json.data;
           if (d.voltage !== undefined) setVoltage(Number(Number(d.voltage).toFixed(1)));
@@ -143,17 +153,28 @@ export default function App() {
           if (d.energy !== undefined) setEnergyUsed(Number(Number(d.energy).toFixed(4)));
           if (d.tariffRate) setTariffRate(d.tariffRate);
           if (d.relayState !== undefined) setRelayState(d.relayState);
+          setSecondsAgo(0);
+          setLastPacketTime(new Date());
           setBackendConnected(true);
         }
-      })
-      .catch((err) => {
-        console.log('[Backend] Waiting for backend at ' + (BACKEND_URL || API_BASE));
-      });
+      } catch (err) {
+        if (!isWsConnected) {
+          setBackendConnected(false);
+        }
+      }
+    };
+
+    fetchLiveState();
+
+    // If WebSocket is not connected, keep polling every 3 seconds
+    if (!isWsConnected) {
+      timer = setInterval(fetchLiveState, 3000);
+    }
 
     return () => {
-      if (socket) socket.disconnect();
+      if (timer) clearInterval(timer);
     };
-  }, []);
+  }, [isWsConnected]);
 
   // Poll ESP32 directly via backend
   const handlePollEsp32 = async () => {
@@ -273,256 +294,157 @@ export default function App() {
   const energyPercent = Math.min(Math.round((energyUsed / 50) * 100), 100);
 
   return (
-    <div className={`app-container ${isMobilePreview ? 'preview-mode-wrapper' : ''}`}>
-      {/* Mobile Device Frame Simulation Wrapper when preview toggle is on */}
-      <div className={isMobilePreview ? 'phone-mockup-frame' : 'full-desktop-wrapper'}>
-        {/* Left Sidebar (Desktop Only) */}
-        {!isMobilePreview && (
-          <Sidebar activeTab={activeTab} onSelectTab={setActiveTab} />
+    <div className="app-container">
+      {/* Left Sidebar (Desktop Only) */}
+      <Sidebar activeTab={activeTab} onSelectTab={setActiveTab} />
+
+      {/* Main Content Area */}
+      <main className="main-content">
+        {/* Mobile Top Bar (Visible only in mobile view <= 768px) */}
+        <div className="mobile-top-bar">
+          <div className="mobile-brand">
+            <div className="mobile-brand-icon">
+              <Zap size={18} fill="white" />
+            </div>
+            <div className="mobile-brand-text">
+              <h2>Smart Energy Meter</h2>
+              <span>IoT Powered</span>
+            </div>
+          </div>
+          <div className="mobile-status-badge">
+            <div className="mobile-status-online">Online</div>
+            <div className="mobile-status-sub">ESP32 Connected</div>
+          </div>
+        </div>
+
+        {/* Desktop Top Header */}
+        <TopHeader
+          deviceConnected={relayState}
+          formattedDate="Sep 17, 2025"
+          formattedTime="03:24 PM"
+        />
+
+        {/* Conditional View Rendering */}
+        {activeTab === 'Dashboard' && (
+          <>
+            {/* Total Electricity Cost Hero Banner */}
+            <HeroCard
+              totalCost={totalCost}
+              power={power.toLocaleString()}
+              energyUsed={energyUsed < 1 && energyUsed > 0 ? energyUsed.toFixed(3) : energyUsed.toFixed(2)}
+            />
+
+            {/* Live Parameters Section */}
+            <section>
+              <div className="section-header-row">
+                <div className="section-title">
+                  <Activity size={20} />
+                  <span>Live Parameters</span>
+                </div>
+                <div className="realtime-pill-badge">
+                  <span className="realtime-dot" />
+                  <span>Real-time</span>
+                </div>
+              </div>
+
+              {/* 4 Circular Radial Gauges */}
+              <div className="gauges-grid">
+                <GaugeCard
+                  title="Voltage"
+                  type="voltage"
+                  icon={<Zap size={18} />}
+                  value={voltage}
+                  unit="V"
+                  percentage={voltagePercent}
+                  maxReference={`(of ${highVoltageLimit} V)`}
+                  color="#00b4d8"
+                />
+                <GaugeCard
+                  title="Current"
+                  type="current"
+                  icon={<Activity size={18} />}
+                  value={current < 1 && current > 0 ? current.toFixed(3) : current.toFixed(2)}
+                  unit="A"
+                  percentage={currentPercent}
+                  maxReference="(of 30 A)"
+                  color="#00e599"
+                />
+                <GaugeCard
+                  title="Power"
+                  type="power"
+                  icon={<Zap size={18} />}
+                  value={power.toLocaleString()}
+                  unit="W"
+                  percentage={powerPercent}
+                  maxReference={`(of ${maxPowerLimit.toLocaleString()} W)`}
+                  color="#ff9f1c"
+                />
+                <GaugeCard
+                  title="Energy Used"
+                  type="energy"
+                  icon={
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+                      <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/>
+                    </svg>
+                  }
+                  value={energyUsed < 1 && energyUsed > 0 ? energyUsed.toFixed(3) : energyUsed.toFixed(2)}
+                  unit="kWh"
+                  percentage={energyPercent}
+                  maxReference="(of 50 kWh)"
+                  color="#d946ef"
+                />
+              </div>
+            </section>
+
+            {/* Bottom 3 Cards Row */}
+            <section className="bottom-cards-grid">
+              <DeviceStatusCard
+                isConnected={backendConnected && relayState}
+                lastUpdatedSeconds={secondsAgo}
+                autoRefresh={!isLiveSimulating}
+                onRefresh={handlePollEsp32}
+                onPoll={handlePollEsp32}
+                isPolling={isPollingEsp}
+                espDevice={espDevice}
+                dataSource={dataSource}
+              />
+              <EnergyTrendChart />
+              <QuickInfoCard
+                tariffRate={tariffRate.toFixed(2)}
+                totalCost={totalCost}
+                energyUsed={energyUsed < 1 && energyUsed > 0 ? energyUsed.toFixed(3) : energyUsed.toFixed(2)}
+                currentPower={power.toLocaleString()}
+              />
+            </section>
+          </>
         )}
 
-        {/* Main Content Area */}
-        <main className="main-content">
-          {/* Mobile Top Bar (Visible only in mobile view or when preview toggle is active) */}
-          <div className="mobile-top-bar">
-            <div className="mobile-brand">
-              <div className="mobile-brand-icon">
-                <Zap size={18} fill="white" />
-              </div>
-              <div className="mobile-brand-text">
-                <h2>Smart Energy Meter</h2>
-                <span>IoT Powered</span>
-              </div>
-            </div>
+        {activeTab === 'History' && (
+          <HistoryView tariffRate={tariffRate} />
+        )}
 
-            <div className="mobile-status-badge">
-              <div className="mobile-status-online">Online</div>
-              <div className="mobile-status-sub">ESP32 Connected</div>
-            </div>
-          </div>
-
-          {/* Desktop Top Header (Hidden on small screens) */}
-          <TopHeader
-            deviceConnected={relayState}
-            formattedDate="Sep 17, 2025"
-            formattedTime="03:24 PM"
-            isMobilePreview={isMobilePreview}
-            setIsMobilePreview={setIsMobilePreview}
+        {activeTab === 'Settings' && (
+          <SettingsView
+            tariffRate={tariffRate}
+            setTariffRate={handleUpdateTariff}
+            relayState={relayState}
+            setRelayState={handleToggleRelay}
+            highVoltageLimit={highVoltageLimit}
+            setHighVoltageLimit={setHighVoltageLimit}
+            maxPowerLimit={maxPowerLimit}
+            setMaxPowerLimit={setMaxPowerLimit}
           />
+        )}
 
-          {/* Interactive Simulation & Backend Controls floating bar */}
-          <div className="control-bar">
-            <div className="control-bar-left">
-              <Activity size={16} color="#00b4d8" />
-              <span>
-                Backend:{' '}
-                <strong style={{ color: backendConnected ? '#10b981' : '#f59e0b' }}>
-                  {backendConnected ? (BACKEND_URL ? 'Node/Express Live' : 'Live (Port 5000)') : 'Connecting / Standalone'}
-                </strong>
-              </span>
+        {activeTab === 'Profile' && (
+          <ProfileView />
+        )}
+      </main>
 
-              <span style={{
-                marginLeft: '10px',
-                fontSize: '12px',
-                fontWeight: 600,
-                padding: '2px 10px',
-                borderRadius: '12px',
-                background: dataSource === 'esp32' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(56, 189, 248, 0.15)',
-                color: dataSource === 'esp32' ? '#10b981' : '#38bdf8',
-                border: `1px solid ${dataSource === 'esp32' ? '#10b981' : '#38bdf8'}`,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-              }}>
-                <span style={{
-                  width: '7px',
-                  height: '7px',
-                  borderRadius: '50%',
-                  background: dataSource === 'esp32' ? '#10b981' : '#38bdf8',
-                }} />
-                {dataSource === 'esp32' ? (espDevice?.ipAddress ? `ESP32 (${espDevice.ipAddress})` : 'ESP32 Stream') : 'Simulator Mode'}
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button
-                className="control-btn"
-                onClick={handlePollEsp32}
-                disabled={isPollingEsp}
-                title="Fetch live data directly from ESP32 /data endpoint"
-                style={{ borderColor: '#10b981', color: '#10b981' }}
-              >
-                <RotateCcw size={13} className={isPollingEsp ? 'animate-spin' : ''} />
-                <span>{isPollingEsp ? 'Polling...' : 'Poll ESP32 Now'}</span>
-              </button>
-
-              <button
-                className={`control-btn ${isLiveSimulating ? 'active' : ''}`}
-                onClick={() => setIsLiveSimulating(!isLiveSimulating)}
-                title="Toggle simulator if ESP32 hardware is not powered on"
-              >
-                {isLiveSimulating ? <Pause size={13} /> : <Play size={13} />}
-                <span>{isLiveSimulating ? 'Stop Simulator' : 'Test with Simulator'}</span>
-              </button>
-
-              {isLiveSimulating && (
-                <>
-                  <button
-                    className={`control-btn ${simulationMode === 'exact' ? 'active' : ''}`}
-                    onClick={resetToScreenshotValues}
-                    title="Lock values to exact screenshot numbers"
-                  >
-                    <span>Exact Image</span>
-                  </button>
-
-                  <button
-                    className={`control-btn ${simulationMode === 'overload' ? 'active' : ''}`}
-                    onClick={() => setSimulationMode('overload')}
-                    title="Simulate high load scenario"
-                  >
-                    <AlertTriangle size={13} color="#f59e0b" />
-                    <span>Overload Demo</span>
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Conditional View Rendering */}
-          {activeTab === 'Dashboard' && (
-            <>
-              {/* Total Electricity Cost Hero Banner */}
-              <HeroCard
-                totalCost={totalCost}
-                power={power.toLocaleString()}
-                energyUsed={energyUsed < 1 && energyUsed > 0 ? energyUsed.toFixed(3) : energyUsed.toFixed(2)}
-              />
-
-              {/* Live Parameters Section */}
-              <section>
-                <div className="section-header-row">
-                  <div className="section-title">
-                    <Activity size={20} />
-                    <span>Live Parameters {dataSource === 'esp32' ? '(ESP32 Hardware)' : '(Simulated)'}</span>
-                  </div>
-
-                  <div className="realtime-pill-badge">
-                    <span className="realtime-dot" />
-                    <span>Real-time</span>
-                  </div>
-                </div>
-
-                {/* 4 Circular Radial Gauges */}
-                <div className="gauges-grid" style={{ marginTop: '16px' }}>
-                  {/* Gauge 1: Voltage */}
-                  <GaugeCard
-                    title="Voltage"
-                    type="voltage"
-                    icon={<Zap size={18} />}
-                    value={voltage}
-                    unit="V"
-                    percentage={voltagePercent}
-                    maxReference={`(of ${highVoltageLimit} V)`}
-                    color="#00b4d8"
-                  />
-
-                  {/* Gauge 2: Current */}
-                  <GaugeCard
-                    title="Current"
-                    type="current"
-                    icon={<Activity size={18} />}
-                    value={current < 1 && current > 0 ? current.toFixed(3) : current.toFixed(2)}
-                    unit="A"
-                    percentage={currentPercent}
-                    maxReference="(of 30 A)"
-                    color="#00e599"
-                  />
-
-                  {/* Gauge 3: Power */}
-                  <GaugeCard
-                    title="Power"
-                    type="power"
-                    icon={<Zap size={18} />}
-                    value={power.toLocaleString()}
-                    unit="W"
-                    percentage={powerPercent}
-                    maxReference={`(of ${maxPowerLimit.toLocaleString()} W)`}
-                    color="#ff9f1c"
-                  />
-
-                  {/* Gauge 4: Energy Used */}
-                  <GaugeCard
-                    title="Energy Used"
-                    type="energy"
-                    icon={
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <ellipse cx="12" cy="5" rx="9" ry="3"/>
-                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-                        <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/>
-                      </svg>
-                    }
-                    value={energyUsed < 1 && energyUsed > 0 ? energyUsed.toFixed(3) : energyUsed.toFixed(2)}
-                    unit="kWh"
-                    percentage={energyPercent}
-                    maxReference="(of 50 kWh)"
-                    color="#d946ef"
-                  />
-                </div>
-              </section>
-
-              {/* Bottom 3 Cards Row */}
-              <section className="bottom-cards-grid">
-                {/* 1. Device Status */}
-                <DeviceStatusCard
-                  isConnected={backendConnected && relayState}
-                  lastUpdatedSeconds={secondsAgo}
-                  autoRefresh={!isLiveSimulating}
-                  onRefresh={handlePollEsp32}
-                  onPoll={handlePollEsp32}
-                  isPolling={isPollingEsp}
-                  espDevice={espDevice}
-                  dataSource={dataSource}
-                />
-
-                {/* 2. Energy Usage Trend Chart */}
-                <EnergyTrendChart />
-
-                {/* 3. Quick Info Card */}
-                <QuickInfoCard
-                  tariffRate={tariffRate.toFixed(2)}
-                  totalCost={totalCost}
-                  energyUsed={energyUsed < 1 && energyUsed > 0 ? energyUsed.toFixed(3) : energyUsed.toFixed(2)}
-                  currentPower={power.toLocaleString()}
-                />
-              </section>
-            </>
-          )}
-
-          {activeTab === 'History' && (
-            <HistoryView tariffRate={tariffRate} />
-          )}
-
-          {activeTab === 'Settings' && (
-            <SettingsView
-              tariffRate={tariffRate}
-              setTariffRate={handleUpdateTariff}
-              relayState={relayState}
-              setRelayState={handleToggleRelay}
-              highVoltageLimit={highVoltageLimit}
-              setHighVoltageLimit={setHighVoltageLimit}
-              maxPowerLimit={maxPowerLimit}
-              setMaxPowerLimit={setMaxPowerLimit}
-            />
-          )}
-
-          {activeTab === 'Profile' && (
-            <ProfileView />
-          )}
-        </main>
-
-        {/* Mobile Bottom Navigation Bar */}
-        <MobileBottomNav activeTab={activeTab} onSelectTab={setActiveTab} />
-      </div>
+      {/* Mobile Bottom Navigation Bar */}
+      <MobileBottomNav activeTab={activeTab} onSelectTab={setActiveTab} />
     </div>
   );
 }

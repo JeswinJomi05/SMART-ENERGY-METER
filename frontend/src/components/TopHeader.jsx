@@ -16,16 +16,6 @@ export default function TopHeader({
       </div>
 
       <div className="header-meta">
-        {/* Device preview switch for desktop users */}
-        <button
-          className="control-btn"
-          onClick={() => setIsMobilePreview(!isMobilePreview)}
-          title="Toggle Mobile/Desktop Layout Preview"
-        >
-          {isMobilePreview ? <Monitor size={14} /> : <Smartphone size={14} />}
-          <span>{isMobilePreview ? 'Desktop View' : 'Mobile View'}</span>
-        </button>
-
         {/* ESP32 Connection Status */}
         <div className="meta-status-chip">
           <div className="wifi-icon-wrapper">

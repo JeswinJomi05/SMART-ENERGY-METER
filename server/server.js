@@ -30,8 +30,23 @@ setSocketIO(io);
 setDeviceSocketIO(io);
 
 // Middlewares
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
+app.options('*', cors());
 app.use(express.json());
+
+// In serverless environments, ensure DB connection is initialized
+app.use(async (req, res, next) => {
+  if (!getDbStatus()) {
+    try {
+      await connectDB();
+    } catch (_) {}
+  }
+  next();
+});
 
 // API Routes
 app.use('/api/telemetry', telemetryRoutes);
@@ -99,4 +114,14 @@ async function startServer() {
   });
 }
 
-startServer();
+// Start server only when run directly (e.g. Render, Railway, VPS, Localhost)
+// On Vercel Serverless, app is exported as the request handler
+if (process.env.VERCEL !== '1' && process.env.NODE_ENV !== 'test') {
+  startServer();
+} else {
+  // In serverless environment, initiate DB connection
+  connectDB().catch(console.error);
+}
+
+export { app, server, io };
+export default app;

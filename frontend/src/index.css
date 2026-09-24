@@ -200,14 +200,20 @@ body {
 /* Main Content Area */
 .main-content {
   flex: 1;
-  padding: 28px 36px 40px;
+  padding: 24px 32px 36px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  max-width: 1400px;
+  gap: 22px;
+  max-width: 1440px;
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
+  min-width: 0;
+}
+
+/* Mobile Top Bar (Hidden by default on Desktop) */
+.mobile-top-bar {
+  display: none;
 }
 
 /* Header Section */
@@ -293,7 +299,7 @@ body {
 .hero-cost-card {
   background: linear-gradient(125deg, #1b53df 0%, #1643ba 35%, #0f2b7f 70%, #0c2062 100%);
   border-radius: var(--radius-lg);
-  padding: 26px 36px;
+  padding: 20px 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -301,6 +307,7 @@ body {
   position: relative;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.12);
+  min-height: 104px;
 }
 
 .hero-bg-waves {
@@ -309,22 +316,23 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
+  width: 100%;
+  height: 100%;
   opacity: 0.28;
   pointer-events: none;
-  background-size: cover;
 }
 
 .hero-left-section {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 18px;
   position: relative;
   z-index: 2;
 }
 
 .wallet-badge-icon {
-  width: 58px;
-  height: 58px;
+  width: 54px;
+  height: 54px;
   background: rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.25);
@@ -334,6 +342,7 @@ body {
   justify-content: center;
   color: #ffffff;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
 }
 
 .hero-cost-info h4 {
@@ -350,13 +359,13 @@ body {
 }
 
 .hero-cost-value .currency-symbol {
-  font-size: 32px;
+  font-size: 30px;
   font-weight: 700;
   color: #ffffff;
 }
 
 .hero-cost-value .amount-number {
-  font-size: 36px;
+  font-size: 34px;
   font-weight: 800;
   color: #ffffff;
   letter-spacing: -0.5px;
@@ -400,15 +409,23 @@ body {
   }
 }
 
+.hero-mobile-house {
+  display: none;
+}
+
+.hero-divider-line {
+  display: none;
+}
+
 .hero-right-metrics {
   display: flex;
   align-items: center;
-  gap: 32px;
+  gap: 28px;
   position: relative;
   z-index: 2;
   background: rgba(10, 20, 50, 0.35);
   backdrop-filter: blur(12px);
-  padding: 12px 24px;
+  padding: 10px 24px;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -420,12 +437,13 @@ body {
 }
 
 .hero-metric-icon-wrap {
-  width: 44px;
-  height: 44px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .hero-metric-icon-wrap.power {
@@ -445,15 +463,15 @@ body {
 }
 
 .hero-metric-texts .metric-val {
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 700;
   color: #ffffff;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .hero-metrics-divider {
   width: 1px;
-  height: 40px;
+  height: 38px;
   background-color: rgba(255, 255, 255, 0.15);
 }
 
@@ -463,6 +481,7 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-top: 4px;
+  margin-bottom: 2px;
 }
 
 .section-title {
@@ -524,7 +543,7 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: 22px 18px 20px;
+  padding: 20px 16px 18px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -547,12 +566,12 @@ body {
   gap: 10px;
   width: 100%;
   justify-content: flex-start;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .gauge-header-icon-wrap {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -588,12 +607,12 @@ body {
 /* SVG Radial Gauge */
 .gauge-visual-container {
   position: relative;
-  width: 180px;
-  height: 180px;
+  width: 160px;
+  height: 160px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 6px 0;
+  margin: 4px 0;
 }
 
 .gauge-svg {
@@ -605,12 +624,10 @@ body {
 .gauge-track {
   fill: none;
   stroke: rgba(255, 255, 255, 0.06);
-  stroke-width: 12;
 }
 
 .gauge-progress {
   fill: none;
-  stroke-width: 12;
   stroke-linecap: round;
   transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -642,7 +659,7 @@ body {
 }
 
 .gauge-card-footer {
-  margin-top: 10px;
+  margin-top: 8px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -668,7 +685,7 @@ body {
 /* Bottom 3-Card Grid */
 .bottom-cards-grid {
   display: grid;
-  grid-template-columns: 280px 1fr 340px;
+  grid-template-columns: 330px 1fr 340px;
   gap: 20px;
   align-items: stretch;
 }
@@ -687,7 +704,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 .info-card-header-icon {
@@ -723,16 +740,18 @@ body {
 /* Device Status Card Internal */
 .device-status-content {
   display: flex;
-  flex-direction: column;
-  justify-content: space-around;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: flex-start;
   flex: 1;
-  gap: 18px;
+  gap: 16px;
+  margin-top: 6px;
 }
 
 .status-block {
   display: flex;
   align-items: flex-start;
-  gap: 14px;
+  gap: 12px;
 }
 
 .status-dot-indicator {
@@ -941,27 +960,35 @@ body {
   display: none;
 }
 
-/* Responsive & Mobile Specific Layouts (matching Screenshot 2) */
-@media (max-width: 1024px) {
+/* Responsive & Mobile Specific Layouts */
+@media (max-width: 1200px) {
+  .bottom-cards-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .trend-chart-card {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 992px) {
   .gauges-grid {
     grid-template-columns: repeat(2, 1fr);
   }
   .bottom-cards-grid {
     grid-template-columns: 1fr;
   }
-  .hero-cost-card {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 20px;
-  }
-  .hero-right-metrics {
-    justify-content: space-around;
+  .trend-chart-card {
+    grid-column: span 1;
   }
 }
 
 @media (max-width: 768px) {
   .sidebar {
     display: none; /* Mobile view has bottom navigation */
+  }
+
+  .top-header {
+    display: none; /* Replaced by mobile-top-bar */
   }
 
   .main-content {
@@ -1035,13 +1062,42 @@ body {
     margin-top: 1px;
   }
 
+  /* Hero Card Mobile Layout matching Screenshot 2 */
   .hero-cost-card {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "cost house"
+      "divider divider"
+      "metrics metrics";
+    gap: 14px;
     padding: 18px 20px;
     border-radius: 18px;
+    min-height: auto;
   }
 
   .hero-left-section {
+    grid-area: cost;
     gap: 14px;
+  }
+
+  .hero-mobile-house {
+    display: flex;
+    grid-area: house;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .hero-center-badge {
+    display: none;
+  }
+
+  .hero-divider-line {
+    display: block;
+    grid-area: divider;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.12);
+    margin: 0 -4px;
   }
 
   .wallet-badge-icon {
@@ -1054,8 +1110,13 @@ body {
   }
 
   .hero-right-metrics {
-    padding: 10px 14px;
-    gap: 16px;
+    grid-area: metrics;
+    display: flex;
+    justify-content: space-around;
+    background: transparent;
+    padding: 0;
+    border: none;
+    backdrop-filter: none;
   }
 
   .hero-metric-texts .metric-val {
@@ -1086,6 +1147,11 @@ body {
 
   .gauge-max-ref {
     font-size: 11px;
+  }
+
+  .device-status-content {
+    flex-direction: column;
+    gap: 16px;
   }
 
   /* Bottom Navigation Bar (exact match to image 2) */
@@ -1126,3 +1192,4 @@ body {
     color: #3b82f6;
   }
 }
+
