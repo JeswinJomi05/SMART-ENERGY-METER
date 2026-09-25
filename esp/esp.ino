@@ -66,8 +66,8 @@
 
 // char ssid[] = "EE-C04";
 // char pass[] = "1234567890";
-char ssid[] = "CET_WiFi";
-char pass[] = "ccfcetwlan";
+char ssid[] = "cet_ee_208";
+char pass[] = "cet@1234";
 
 // ============================================================
 // MERN BACKEND SERVER
@@ -77,7 +77,7 @@ char pass[] = "ccfcetwlan";
 // Run `ipconfig` in Windows CMD to find it.
 // Example: 192.168.1.100
 //
-const char* BACKEND_SERVER_IP   = "192.168.41.186";
+const char* BACKEND_SERVER_IP   = "192.168.1.137";
 const int   BACKEND_SERVER_PORT = 5000;
 const char* BACKEND_TELEMETRY_ENDPOINT = "/api/telemetry";
 
