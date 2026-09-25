@@ -10,6 +10,7 @@ import { setDeviceSocketIO } from './controllers/deviceController.js';
 import telemetryRoutes from './routes/telemetryRoutes.js';
 import settingsRoutes from './routes/settingsRoutes.js';
 import deviceRoutes from './routes/deviceRoutes.js';
+import os from 'os';
 
 // Load environment variables
 dotenv.config();
@@ -30,10 +31,20 @@ setSocketIO(io);
 setDeviceSocketIO(io);
 
 // Middlewares
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-CSRF-Token, Accept-Version, Content-Length, Content-MD5, Date, X-Api-Version');
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
+
 app.use(cors({
   origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'X-CSRF-Token'],
 }));
 app.options('*', cors());
 app.use(express.json());
@@ -96,6 +107,27 @@ io.on('connection', (socket) => {
   });
 });
 
+// 404 Catch-All handler with CORS headers
+app.use((req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.status(404).json({
+    success: false,
+    message: `API Route not found: ${req.method} ${req.originalUrl}`,
+  });
+});
+
+// Global error handler with CORS headers
+app.use((err, req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  console.error('[Express Error Handler]', err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal Server Error',
+  });
+});
+
 // Connect to MongoDB and MQTT
 const PORT = process.env.PORT || 5000;
 
@@ -103,13 +135,30 @@ async function startServer() {
   await connectDB();
   initMqtt();
 
-  server.listen(PORT, () => {
+  
+
+// Helper to get the first non‑internal IPv4 address
+function getLocalIPAddress() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return 'localhost';
+}
+
+const localIP = getLocalIPAddress();
+
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`\n======================================================`);
     console.log(`⚡ Smart Energy Meter MERN Backend running on port ${PORT}`);
-    console.log(`   ➜ REST API:       http://localhost:${PORT}/api/telemetry`);
-    console.log(`   ➜ Health Check:   http://localhost:${PORT}/api/health`);
-    console.log(`   ➜ WebSocket:      ws://localhost:${PORT}`);
-    console.log(`   ➜ ESP32 Endpoint: POST http://localhost:${PORT}/api/telemetry`);
+    console.log(`   ➜ REST API:       http://${localIP}:${PORT}/api/telemetry`);
+    console.log(`   ➜ Health Check:   http://${localIP}:${PORT}/api/health`);
+    console.log(`   ➜ WebSocket:      ws://${localIP}:${PORT}`);
+    console.log(`   ➜ ESP32 Endpoint: POST http://${localIP}:${PORT}/api/telemetry`);
     console.log(`======================================================\n`);
   });
 }
